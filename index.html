@@ -127,6 +127,26 @@ td.num,th.num{text-align:right}
 .pfoot .btn{padding:4px 10px;font-size:12px}
 .pvazio{padding:28px 16px;text-align:center;color:var(--tx2)}
 
+
+/* Abas */
+.tabs{background:#fff;border-bottom:2px solid var(--line);padding:0 24px;display:flex;gap:8px;overflow-x:auto}
+.tab{background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;padding:14px 18px;font-weight:600;color:var(--tx2);cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--blue)}
+.tab.on{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* Gerenciamento ETC */
+.busca{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:260px}
+.busca:focus{border-color:var(--blue);outline:none}
+.pill{background:var(--blue-bg);color:var(--blue);border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600}
+#tEtc{min-width:900px}
+#tEtc th.sort{cursor:pointer;user-select:none}
+#tEtc th.sort:hover{color:var(--blue)}
+#tEtc th.c,#tEtc td.c{text-align:center}
+#tEtc td.etc{max-width:260px;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.traco{color:#cbd5e0}
+.dist{display:flex;gap:2px;height:10px;width:120px;align-items:stretch}
+.dist i{display:block;border-radius:2px;min-width:4px}
+
 /* Drawer */
 #backdrop{position:fixed;inset:0;background:rgba(26,32,44,.4);backdrop-filter:blur(3px);z-index:20}
 #drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100%);background:var(--card);border-left:1px solid var(--line);z-index:21;overflow-y:auto;transition:transform .2s;box-shadow:-10px 0 30px rgba(26,32,44,.15)}
@@ -170,6 +190,10 @@ td.num,th.num{text-align:right}
     <div class="quem"><b id="quemNome">—</b><br><span id="quemTipo"></span></div>
     <button class="btn" id="btnSair">Sair</button>
   </header>
+  <nav class="tabs hidden" id="tabs">
+    <button class="tab on" data-aba="kangu">Gerenciamento Kangu</button>
+    <button class="tab" data-aba="etc">Gerenciamento ETC</button>
+  </nav>
 
   <main>
     <div class="box filters">
@@ -181,6 +205,7 @@ td.num,th.num{text-align:right}
       <span class="count" id="countPill">0 pacotes</span>
     </div>
 
+    <div id="viewKangu">
     <div class="metrics" id="metrics"></div>
 
     <div class="charts" id="charts">
@@ -200,6 +225,19 @@ td.num,th.num{text-align:right}
     </div>
 
     <div class="grid-urg" id="tabelas"></div>
+    </div>
+
+    <div id="viewEtc" class="hidden">
+      <div class="box">
+        <div class="toolbar">
+          <input class="busca" id="etcBusca" type="search" placeholder="Buscar ETC…" aria-label="Buscar ETC">
+          <span class="pill" id="etcCount"></span>
+          <div class="info">Clique numa ETC para ver os pacotes dela.</div>
+        </div>
+        <div class="twrap"><table id="tEtc"><thead></thead><tbody></tbody></table></div>
+        <div class="pfoot" id="etcFoot"></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -340,6 +378,11 @@ async function iniciar(){
   $('boxTop').classList.toggle('hidden', !isAdmin);
 
   filtros = {etc:'', reg:'', urg:'', est:''};
+  // A aba "Gerenciamento ETC" compara ETCs entre si, então só o acesso completo vê
+  $('tabs').classList.toggle('hidden', !isAdmin);
+  aba = 'kangu'; etcPag = 1; $('etcBusca').value = '';
+  $('viewKangu').classList.remove('hidden'); $('viewEtc').classList.add('hidden');
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.aba === 'kangu'));
   montarFiltros();
   render();
   mostrar('app');
@@ -375,9 +418,84 @@ function render(){
   paginasU = {};
   const lista = filtrados();
   $('countPill').textContent = fmtInt(lista.length) + ' pacotes';
+  if(aba === 'etc'){ renderEtc(lista); return; }
   renderMetricas(lista);
   renderGraficos(lista);
   renderTabela(lista);
+}
+
+/* ============ ABAS / GERENCIAMENTO ETC ============ */
+let aba = 'kangu';
+let etcSort = {k:'total', d:-1};
+let etcPag = 1;
+let etcLinhas = [];
+const ETC_POR_PAGINA = 25;
+const COLS_ETC = [
+  {k:'etc', t:'ETC'},
+  {k:'total', t:'Total pacotes', c:true},
+  {k:'gmv', t:'GMV em risco (R$)', c:true},
+  {k:'CRITICO', t:'Crítico', c:true, cor:'#e53e3e'},
+  {k:'ALTO', t:'Alto', c:true, cor:'#dd6b20'},
+  {k:'MEDIO', t:'Médio', c:true, cor:'#d69e2e'},
+  {k:'BAIXO', t:'Baixo', c:true, cor:'#38a169'},
+  {k:'med', t:'Dias méd. estancado', c:true},
+  {k:'dist', t:'Distribuição', nosort:true}
+];
+
+function setAba(a){
+  aba = a;
+  $('viewKangu').classList.toggle('hidden', a !== 'kangu');
+  $('viewEtc').classList.toggle('hidden', a !== 'etc');
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.aba === a));
+  render();
+}
+
+function corDias(d){ return d >= 10 ? '#e53e3e' : d >= 7 ? '#dd6b20' : d >= 3 ? '#d69e2e' : '#38a169'; }
+
+function renderEtc(lista){
+  const m = {};
+  lista.forEach(r => {
+    const o = m[r._etc] ||= {etc:r._etc, total:0, gmv:0, dias:0, CRITICO:0, ALTO:0, MEDIO:0, BAIXO:0};
+    o.total++; o.gmv += num(r.gmv_brl); o.dias += num(r.dias_estancado);
+    if(['CRITICO','ALTO','MEDIO','BAIXO'].includes(r._urg)) o[r._urg]++;
+  });
+  const q = norm($('etcBusca').value);
+  let linhas = Object.values(m).map(o => ({...o, med:o.dias/o.total}))
+    .filter(o => !q || norm(o.etc).includes(q));
+  const {k, d} = etcSort;
+  linhas.sort((a,b) => (k === 'etc' ? a.etc.localeCompare(b.etc,'pt-BR') : (a[k]-b[k])) * d || b.total - a.total);
+  etcLinhas = linhas;
+
+  $('etcCount').textContent = fmtInt(linhas.length) + ' ETCs';
+  const paginas = Math.max(1, Math.ceil(linhas.length / ETC_POR_PAGINA));
+  if(etcPag > paginas) etcPag = paginas;
+  const ini = (etcPag-1) * ETC_POR_PAGINA;
+  const fatia = linhas.slice(ini, ini + ETC_POR_PAGINA);
+
+  $('tEtc').querySelector('thead').innerHTML = '<tr>' + COLS_ETC.map(c => {
+    const seta = etcSort.k === c.k ? (etcSort.d === -1 ? ' ↓' : ' ↑') : '';
+    return `<th class="${c.nosort ? '' : 'sort'} ${c.c ? 'c' : ''}" ${c.nosort ? '' : `data-sort="${c.k}"`}>` +
+      (c.cor ? `<span style="color:${c.cor}">●</span> ` : '') + esc(c.t) + seta + '</th>';
+  }).join('') + '</tr>';
+
+  $('tEtc').querySelector('tbody').innerHTML = fatia.length ? fatia.map((o,i) => {
+    const cel = key => o[key] ? `<td class="c"><b style="color:${urgInfo(key).cor}">${fmtInt(o[key])}</b></td>` : '<td class="c traco">—</td>';
+    const dist = ['CRITICO','ALTO','MEDIO','BAIXO'].filter(x => o[x])
+      .map(x => `<i style="flex:${o[x]};background:${urgInfo(x).cor}" title="${esc(urgInfo(x).label)}: ${o[x]}"></i>`).join('');
+    return `<tr data-i="${ini+i}">
+      <td class="etc" title="${esc(o.etc)}">${esc(o.etc)}</td>
+      <td class="c"><b>${fmtInt(o.total)}</b></td>
+      <td class="c">${esc(fmtBRL(o.gmv))}</td>
+      ${cel('CRITICO')}${cel('ALTO')}${cel('MEDIO')}${cel('BAIXO')}
+      <td class="c"><b style="color:${corDias(o.med)}">${Math.round(o.med)}</b></td>
+      <td><div class="dist">${dist}</div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="${COLS_ETC.length}" class="vazio">Nenhuma ETC encontrada.</td></tr>`;
+
+  $('etcFoot').innerHTML = `
+    <button class="btn" data-d="-1" ${etcPag<=1?'disabled':''}>‹ Anterior</button>
+    <span>Página <b>${etcPag}</b> de ${paginas} · ${fmtInt(linhas.length)} ETCs</span>
+    <button class="btn" data-d="1" ${etcPag>=paginas?'disabled':''}>Próxima ›</button>`;
 }
 
 function renderMetricas(lista){
@@ -562,6 +680,25 @@ $('tabelas').addEventListener('click', e => {
 $('dClose').addEventListener('click', fecharDrawer);
 $('backdrop').addEventListener('click', fecharDrawer);
 document.addEventListener('keydown', e => { if(e.key==='Escape') fecharDrawer(); });
+
+// Abas e Gerenciamento ETC
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => setAba(b.dataset.aba)));
+$('etcBusca').addEventListener('input', () => { etcPag = 1; renderEtc(filtrados()); });
+$('viewEtc').addEventListener('click', e => {
+  const th = e.target.closest('th[data-sort]');
+  if(th){
+    const k = th.dataset.sort;
+    etcSort = etcSort.k === k ? {k, d:-etcSort.d} : {k, d: k === 'etc' ? 1 : -1};
+    etcPag = 1; renderEtc(filtrados()); return;
+  }
+  const b = e.target.closest('button[data-d]');
+  if(b){ etcPag += Number(b.dataset.d); renderEtc(filtrados()); return; }
+  const tr = e.target.closest('tbody tr[data-i]');
+  if(tr){
+    const o = etcLinhas[Number(tr.dataset.i)]; if(!o) return;
+    filtros.etc = o.etc; $('fEtc').value = o.etc; setAba('kangu');
+  }
+});
 
 // Se a sessão expirar, volta para o login
 sb.auth.onAuthStateChange((evento) => { if(evento === 'SIGNED_OUT') mostrar('login'); });
