@@ -75,7 +75,8 @@ main{padding:20px 24px 48px;max-width:1500px;margin:0 auto}
 /* Gráficos */
 .charts{display:grid;grid-template-columns:1fr 1fr 1.6fr;gap:14px;margin-bottom:16px}
 .charts.solo{grid-template-columns:1fr 1fr}
-.chart{padding:16px}
+.chart{padding:16px;min-width:0}
+.charts>*,.metrics>*{min-width:0}
 .chart h2{font-size:13px;font-weight:600;margin-bottom:12px}
 .chart .cv{position:relative;height:230px}
 .chart .hint{color:var(--tx2);font-size:11px;margin-top:8px}
