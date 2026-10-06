@@ -285,7 +285,7 @@ function fmtData(v){
 
 // Urgência: usa a coluna da base; se vier vazia, calcula pelos dias estancado
 function urgenciaDe(r){
-  const u = norm(r.urgencia);
+  const u = norm(r.urgencia).replace(/[^A-Z]/g,''); // a base traz emoji junto (ex.: 🔴 CRÍTICO)
   if(u) return u;
   const d = num(r.dias_estancado);
   if(d >= 10) return 'CRITICO';
@@ -354,7 +354,7 @@ async function iniciar(){
     dados = (await carregar()).map(r => ({
       ...r,
       _urg: urgenciaDe(r),
-      _cls: norm(r.classificacao),
+      _cls: norm(r.classificacao).replace(/[^A-Z]/g,''),
       _etc: r.nome_etc || '—',
       _reg: r.regional || '—',
       _est: norm(r.estagio_bpp) || '—'
