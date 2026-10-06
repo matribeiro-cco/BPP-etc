@@ -105,6 +105,28 @@ td.num,th.num{text-align:right}
 .b-gray{color:var(--tx2);border-color:var(--line);background:var(--input)}
 .vazio{padding:40px 16px;text-align:center;color:var(--tx2)}
 
+
+/* Tabelas por urgência */
+.grid-urg{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid-urg>*{min-width:0}
+@media(max-width:1300px){.grid-urg{grid-template-columns:1fr}}
+.painel{border-left:4px solid var(--c);overflow:hidden}
+.painel .ph{display:flex;align-items:center;gap:10px;padding:14px 16px}
+.painel .ph .dot{width:11px;height:11px;border-radius:50%;background:var(--c)}
+.painel .ph .nome{font-weight:700;font-size:13px;color:var(--c);letter-spacing:.4px}
+.painel .ph .resumo{background:var(--t);color:var(--c);border-radius:999px;padding:3px 12px;font-size:12px;font-weight:700}
+.painel table{min-width:760px}
+.painel th{padding:8px 10px;font-size:11px}
+.painel td{padding:8px 10px;font-size:13px}
+.painel tbody tr{background:var(--t)}
+.painel tbody tr:hover{filter:brightness(.96)}
+.painel td.dias{text-align:center;font-weight:800;color:var(--c)}
+.trunc{max-width:130px;overflow:hidden;text-overflow:ellipsis}
+.badge .d{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.pfoot{display:flex;align-items:center;gap:10px;padding:10px 16px;font-size:12px;color:var(--tx2)}
+.pfoot .btn{padding:4px 10px;font-size:12px}
+.pvazio{padding:28px 16px;text-align:center;color:var(--tx2)}
+
 /* Drawer */
 #backdrop{position:fixed;inset:0;background:rgba(26,32,44,.4);backdrop-filter:blur(3px);z-index:20}
 #drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100%);background:var(--card);border-left:1px solid var(--line);z-index:21;overflow-y:auto;transition:transform .2s;box-shadow:-10px 0 30px rgba(26,32,44,.15)}
@@ -177,27 +199,7 @@ td.num,th.num{text-align:right}
       </div>
     </div>
 
-    <div class="box">
-      <div class="toolbar">
-        <div class="info" id="tInfo"></div>
-        <div class="pager">
-          <button class="btn" id="pPrev">Anterior</button>
-          <span id="pTxt"></span>
-          <button class="btn" id="pNext">Próxima</button>
-        </div>
-      </div>
-      <div class="twrap">
-        <table>
-          <thead><tr>
-            <th>Shipment ID</th><th>Data atribuição</th><th id="thEtc">ETC</th><th>Motorista</th>
-            <th>Classificação</th><th>Urgência</th><th class="num">Dias estancado</th>
-            <th>Estágio BPP</th><th class="num">GMV (R$)</th><th>Regional</th>
-          </tr></thead>
-          <tbody id="tbody"></tbody>
-        </table>
-      </div>
-      <div class="vazio hidden" id="vazio">Nenhum pacote encontrado com esses filtros.</div>
-    </div>
+    <div class="grid-urg" id="tabelas"></div>
   </main>
 </div>
 
@@ -334,7 +336,6 @@ async function iniciar(){
 
   // Usuário de ETC não precisa do filtro de ETC nem do ranking entre ETCs
   $('fEtcWrap').classList.toggle('hidden', !isAdmin);
-  $('thEtc').classList.toggle('hidden', !isAdmin);
   $('charts').classList.toggle('solo', !isAdmin);
   $('boxTop').classList.toggle('hidden', !isAdmin);
 
@@ -371,6 +372,7 @@ function filtrados(){
 
 /* ============ RENDER ============ */
 function render(){
+  paginasU = {};
   const lista = filtrados();
   $('countPill').textContent = fmtInt(lista.length) + ' pacotes';
   renderMetricas(lista);
@@ -446,41 +448,76 @@ function renderGraficos(lista){
   }
 }
 
-function ordenada(lista){
-  return [...lista].sort((a,b) => num(b.dias_estancado) - num(a.dias_estancado));
+const POR_TABELA = 10;
+const ORDEM_URG = ['CRITICO','ALTO','MEDIO','BAIXO'];
+const TINT = {CRITICO:'#fff5f5', ALTO:'#fff7ed', MEDIO:'#fffbea', BAIXO:'#f0fff4'};
+const TINT_PILL = {CRITICO:'#ffe3e3', ALTO:'#ffedd5', MEDIO:'#fef3c7', BAIXO:'#dcfce7'};
+let paginasU = {};
+let grupos = {};
+
+function estagioBadge(v){
+  const n = norm(v);
+  if(n.includes('SEM PAG')) return '<span class="badge b-blue">Sem Pagamento</span>';
+  if(n.includes('SIMPLES')) return '<span class="badge b-yellow">BPP Simples</span>';
+  return `<span class="badge b-gray">${esc(v || '—')}</span>`;
 }
+
 function renderTabela(lista){
-  const ord = ordenada(lista);
-  const total = ord.length;
-  const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
-  if(pagina > paginas) pagina = paginas;
-  const ini = (pagina-1)*POR_PAGINA;
-  const fatia = ord.slice(ini, ini + POR_PAGINA);
+  const ord = [...lista].sort((a,b) => num(b.dias_estancado) - num(a.dias_estancado));
+  grupos = {};
+  ord.forEach(r => (grupos[r._urg] ||= []).push(r));
+  const chaves = [...ORDEM_URG, ...Object.keys(grupos).filter(k => !ORDEM_URG.includes(k))];
 
-  $('tInfo').textContent = total ? `Mostrando ${ini+1}–${ini+fatia.length} de ${fmtInt(total)} · ordenado por dias estancado` : '';
-  $('pTxt').textContent = `${pagina} / ${paginas}`;
-  $('pPrev').disabled = pagina <= 1;
-  $('pNext').disabled = pagina >= paginas;
-  $('vazio').classList.toggle('hidden', total > 0);
-
-  $('tbody').innerHTML = fatia.map((r,i) => {
-    const u = urgInfo(r._urg), c = clsInfo(r._cls);
-    return `<tr data-i="${ini+i}">
-      <td><span class="chip">${esc(r.shp_shipment_id)}</span></td>
-      <td>${fmtData(r.data_atribuicao)}</td>
-      ${isAdmin ? `<td>${esc(r._etc)}</td>` : ''}
-      <td>${esc(r.nome_motorista)}</td>
-      <td><span class="badge ${c.badge}">${esc(c.label)}</span></td>
-      <td><span class="badge ${u.badge}">${esc(u.label)}</span></td>
-      <td class="num">${esc(num(r.dias_estancado))}</td>
-      <td>${esc(r.estagio_bpp)}</td>
-      <td class="num">${num(r.gmv_brl).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      <td>${esc(r._reg)}</td>
-    </tr>`;
+  $('tabelas').innerHTML = chaves.map(k => {
+    const itens = grupos[k] || [];
+    const u = urgInfo(k);
+    const total = itens.length;
+    const gmv = itens.reduce((s,r)=>s+num(r.gmv_brl),0);
+    const paginas = Math.max(1, Math.ceil(total / POR_TABELA));
+    const pg = Math.min(paginasU[k] || 1, paginas);
+    paginasU[k] = pg;
+    const ini = (pg-1)*POR_TABELA;
+    const fatia = itens.slice(ini, ini + POR_TABELA);
+    const cab = `<div class="ph"><span class="dot"></span><span class="nome">${esc(u.label.toUpperCase())}</span>
+      <span class="resumo">${fmtInt(total)} pacotes · ${esc(fmtCompacto(gmv))}</span></div>`;
+    let corpo;
+    if(!total){
+      corpo = '<div class="pvazio">Nenhum pacote nesta urgência.</div>';
+    }else{
+      const linhas = fatia.map((r,i) => {
+        const c = clsInfo(r._cls);
+        return `<tr data-g="${esc(k)}" data-i="${ini+i}">
+          <td><span class="chip">${esc(r.shp_shipment_id)}</span></td>
+          <td>${fmtData(r.data_atribuicao)}</td>
+          ${isAdmin ? `<td><div class="trunc" title="${esc(r._etc)}">${esc(r._etc)}</div></td>` : ''}
+          <td><div class="trunc" title="${esc(r.nome_motorista)}">${esc(r.nome_motorista)}</div></td>
+          <td><span class="badge ${c.badge}">${esc(c.label)}</span></td>
+          <td><span class="badge ${u.badge}"><span class="d" style="background:${u.cor}"></span>${esc(u.label)}</span></td>
+          <td class="dias">${esc(num(r.dias_estancado))}</td>
+          <td>${estagioBadge(r.estagio_bpp)}</td>
+          <td class="num">${esc(fmtBRL(num(r.gmv_brl)))}</td>
+          <td>${esc(r._reg)}</td>
+        </tr>`;
+      }).join('');
+      corpo = `<div class="twrap"><table><thead><tr>
+        <th>Shipment ID</th><th>Data atribuição</th>${isAdmin ? '<th>ETC</th>' : ''}<th>Motorista</th>
+        <th>Classificação</th><th>Urgência</th><th style="text-align:center">Dias estancado</th>
+        <th>Estágio BPP</th><th class="num">GMV (R$)</th><th>Regional</th>
+      </tr></thead><tbody>${linhas}</tbody></table></div>
+      <div class="pfoot">
+        <button class="btn" data-g="${esc(k)}" data-d="-1" ${pg<=1?'disabled':''}>‹ Anterior</button>
+        <span>Página <b>${pg}</b> de ${paginas} · ${fmtInt(total)} registros</span>
+        <button class="btn" data-g="${esc(k)}" data-d="1" ${pg>=paginas?'disabled':''}>Próxima ›</button>
+      </div>`;
+    }
+    return `<section class="box painel" style="--c:${u.cor};--t:${TINT[k]||'#f7f9fc'}">${cab}${corpo}</section>`;
   }).join('');
-  tabelaAtual = ord;
+
+  // pílula do cabeçalho com a cor suave de cada urgência
+  document.querySelectorAll('.painel').forEach((el,i) => {
+    const k = chaves[i]; el.querySelector('.resumo').style.background = TINT_PILL[k] || '#edf2f7';
+  });
 }
-let tabelaAtual = [];
 
 /* ============ DRAWER ============ */
 function abrirDrawer(r){
@@ -516,11 +553,11 @@ $('btnSair').addEventListener('click', sair);
 [['fEtc','etc'],['fReg','reg'],['fUrg','urg'],['fEst','est']].forEach(([id,k]) =>
   $(id).addEventListener('change', e => { filtros[k] = e.target.value; pagina = 1; render(); }));
 $('btnLimpar').addEventListener('click', () => { filtros = {etc:'',reg:'',urg:'',est:''}; montarFiltros(); pagina = 1; render(); });
-$('pPrev').addEventListener('click', () => { pagina--; renderTabela(filtrados()); });
-$('pNext').addEventListener('click', () => { pagina++; renderTabela(filtrados()); });
-$('tbody').addEventListener('click', e => {
-  const tr = e.target.closest('tr'); if(!tr) return;
-  const r = tabelaAtual[Number(tr.dataset.i)]; if(r) abrirDrawer(r);
+$('tabelas').addEventListener('click', e => {
+  const b = e.target.closest('button[data-d]');
+  if(b){ const k = b.dataset.g; paginasU[k] = (paginasU[k]||1) + Number(b.dataset.d); renderTabela(filtrados()); return; }
+  const tr = e.target.closest('tr[data-g]'); if(!tr) return;
+  const r = (grupos[tr.dataset.g] || [])[Number(tr.dataset.i)]; if(r) abrirDrawer(r);
 });
 $('dClose').addEventListener('click', fecharDrawer);
 $('backdrop').addEventListener('click', fecharDrawer);
