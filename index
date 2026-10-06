@@ -210,7 +210,7 @@ td.num,th.num{text-align:right}
 <script>
 /* ============ CONFIGURAÇÃO ============ */
 const SUPABASE_URL = 'https://lpwqikmnkhsuxozwpakn.supabase.co';
-const SUPABASE_ANON_KEY = 'COLE_AQUI_A_CHAVE_ANON'; // Settings > API > anon public. NUNCA use a service_role.
+const SUPABASE_ANON_KEY = 'sb_publishable_2Ux1mO8rR7Vz9UkSwrneqA_tIA40w3v'; // Settings > API > anon public. NUNCA use a service_role.
 const TABELA = 'ipo_risco_bpp';
 const DOMINIO_ADMIN = '@mercadolivre.com';
 const POR_PAGINA = 25;
